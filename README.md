@@ -13,3 +13,29 @@ The `pkg/sqlgen` package has an SQL generator in it, which will generate sqlite 
 ## SQL parsing
 
 When the database is started, we look at which tables already exist in the sqlite copy, and make sure new tables are created automatically on the fly.
+
+
+## Trying it out
+
+1. Create a database
+
+   ```
+   create database myappdatabase;
+   ```
+
+2. Create a user -- must be a super user because we create a publication on all tables
+
+   ```
+   create user sqledger with login superuser password 'secret';
+   ```
+
+
+3. Run the example
+
+   ```
+   SQLEDGE_DEMO_CONN_STRING="postgres://sqledger:secret@127.0.0.1/myappdatabase" go run ./replicator/main.go
+   ```
+
+
+
+

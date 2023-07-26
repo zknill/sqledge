@@ -26,7 +26,7 @@ type Sqlite struct {
 
 	// TODO: move these to the parent
 	// tx  bool
-	// lsn pglogrepl.LSN
+	pos pglogrepl.LSN
 }
 
 func NewSqlite(cfg SqliteConfig, current map[string]map[string]ColDef) *Sqlite {
@@ -317,22 +317,31 @@ func (s *Sqlite) Truncate(msg *pglogrepl.TruncateMessageV2) (string, error) {
 }
 
 func (s *Sqlite) Begin(msg *pglogrepl.BeginMessage) (string, error) {
-	//if err := s.trackLSN(msg.FinalLSN); err != nil {
-	//	return "", err
-	//}
-
-	//if s.tx {
-	//	// already in a tx - shouldn't happen
-	//	return "ROLLBACK; BEGIN TRANSACTION;", nil
-	//}
-
-	//s.tx = true
+	s.pos = msg.FinalLSN
 	return "BEGIN TRANSACTION;", nil
 }
 
-func (s *Sqlite) Commit(_ *pglogrepl.CommitMessage) (string, error) {
-	//s.tx = false
+func (s *Sqlite) StreamStart(msg *pglogrepl.StreamStartMessageV2) (string, error) {
+	return "BEGIN TRANSACTION;", nil
+}
+
+func (s *Sqlite) StreamStop(msg *pglogrepl.StreamStopMessageV2) (string, error) {
 	return "COMMIT;", nil
+}
+
+func (s *Sqlite) StreamCommit(msg *pglogrepl.StreamCommitMessageV2) (string, error) {
+	return "COMMIT;", nil
+}
+
+func (s *Sqlite) StreamAbort(msg *pglogrepl.StreamAbortMessageV2) (string, error) {
+	return "ROLLBACK;", nil
+}
+
+func (s *Sqlite) Commit(_ *pglogrepl.CommitMessage) (string, error) {
+	return fmt.Sprintf(
+		"INSERT OR REPLACE INTO postgres_pos (source_db, plugin, publication, pos) VALUES ('%s', '%s', '%s', '%s');\n COMMIT;",
+		s.cfg.SourceDB, s.cfg.Plugin, s.cfg.Publication, s.pos,
+	), nil
 }
 
 type column struct {
@@ -390,19 +399,3 @@ func (s *Sqlite) parseColums(rel *pglogrepl.RelationMessageV2, cols []*pglogrepl
 
 	return out, nil
 }
-
-//func (s *Sqlite) trackLSN(lsn pglogrepl.LSN) error {
-//	s.lsn = lsn
-//	_, err := s.db.Exec(
-//		`INSERT OR REPLACE INTO postgres_lsn (source_db, plugin, publication, lsn) VALUES (?, ?, ?, ?);`,
-//		s.cfg.SourceDB,
-//		s.cfg.Plugin,
-//		s.cfg.Publication,
-//		lsn.String(),
-//	)
-//	if err != nil {
-//		return fmt.Errorf("track lsn: %w", err)
-//	}
-//
-//	return nil
-//}
