@@ -1,10 +1,13 @@
 package replicate
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pglogrepl"
@@ -91,10 +94,153 @@ type SQLGen interface {
 	StreamAbort(*pglogrepl.StreamAbortMessageV2) (string, error)
 }
 
+type FieldDecoder interface {
+	Decode(b []byte) string
+}
+
+type int4 struct{}
+
+func (i *int4) Decode(b []byte) string {
+	v := binary.BigEndian.Uint32(b)
+	return strconv.FormatUint(uint64(v), 10)
+}
+
+type str struct{}
+
+func (s *str) Decode(b []byte) string {
+	return string(b)
+}
+
+type dump struct {
+	elem FieldDecoder
+}
+
+func (d *dump) Decode(b []byte) string {
+	ndim := binary.BigEndian.Uint32(b[0:4])
+	hasNull := binary.BigEndian.Uint32(b[4:8])
+	elemType := binary.BigEndian.Uint32(b[8:12])
+	dimensions := binary.BigEndian.Uint32(b[12:16])
+	lbI := binary.BigEndian.Uint32(b[16:20])
+
+	log.Trace().Msgf("num dimensions: %d", ndim)
+	log.Trace().Msgf("hasNull: %d", hasNull)
+	log.Trace().Msgf("elemType: %d", elemType)
+	log.Trace().Msgf("dimensions: %d", dimensions)
+	log.Trace().Msgf("lower bound: %d", lbI)
+
+	low := uint32(20)
+	high := uint32(24)
+
+	buf := bytes.Buffer{}
+	buf.WriteRune('{')
+
+	for i := uint32(0); i < dimensions; i++ {
+		if hasNull == 1 {
+			if bytes.Equal(b[low:high], []byte{0xff, 0xff, 0xff, 0xff}) {
+				buf.WriteString("null")
+				if i < dimensions-1 {
+					buf.WriteString(", ")
+				}
+				low = high
+				high = low + 4
+				continue
+			}
+
+		}
+
+		fieldLen := binary.BigEndian.Uint32(b[low:high])
+
+		low = high
+		high = low + fieldLen
+
+		buf.WriteString(d.elem.Decode(b[low:high]))
+		if i < dimensions-1 {
+			buf.WriteString(", ")
+		}
+
+		low = high
+		high = low + 4
+	}
+	buf.WriteRune('}')
+
+	return buf.String()
+}
+
 func (c *Conn) Stream(ctx context.Context, cfg SlotConfig, d DBDriver, gen SQLGen) error {
 	pos, err := d.Pos()
 	if err != nil {
 		return fmt.Errorf("find starting pos: %w", err)
+	}
+
+	log.Debug().Msg("starting copy")
+
+	// no position stored
+	// copy the entire database
+	b := &bytes.Buffer{}
+
+	_, err = c.conn.CopyTo(ctx, b, `copy names to stdout with binary`)
+	if err != nil {
+		log.Error().Err(err).Msg("copy error")
+	}
+
+	low := uint32(11)
+	high := low + 4
+
+	//low, high = high, high+4
+
+	fmt.Println("flags", binary.BigEndian.Uint32(b.Bytes()[low:high]))
+
+	low = high
+	high = low + 4
+
+	headerExtension := binary.BigEndian.Uint32(b.Bytes()[low:high])
+
+	low += headerExtension
+	high += headerExtension
+
+	fmt.Println("header extension", headerExtension)
+
+	data := b.Bytes()
+
+	decoders := []FieldDecoder{
+		new(int4),
+		new(str),
+		new(str),
+		&dump{elem: new(int4)},
+		&dump{elem: new(str)},
+	}
+
+	for {
+		low = high
+		high = low + 2
+
+		if bytes.Equal(data[low:high], []byte{0xff, 0xff}) {
+			break
+		}
+
+		tupleFields := binary.BigEndian.Uint16(data[low:high])
+
+		if tupleFields != uint16(len(decoders)) {
+			return errors.New("wrong number of decoders for tuple fields")
+		}
+
+		for i := uint16(0); i < tupleFields; i++ {
+			low = high
+			high = low + 4
+
+			if bytes.Equal(data[low:high], []byte{0xff, 0xff, 0xff, 0xff}) {
+				fmt.Printf("NULL, ")
+				continue
+			}
+
+			fieldLen := binary.BigEndian.Uint32(data[low:high])
+
+			low = high
+			high = low + fieldLen
+
+			fmt.Printf(decoders[i].Decode(data[low:high]) + ", ")
+		}
+		fmt.Println()
 	}
 
 	if pos != "" {

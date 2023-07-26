@@ -66,6 +66,8 @@ func main() {
 		Temporary:            true,
 	}
 
+	log.Debug().Msg("starting streaming")
+
 	if err := conn.Stream(
 		context.Background(),
 		slot,

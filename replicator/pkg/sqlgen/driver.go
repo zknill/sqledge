@@ -2,6 +2,7 @@ package sqlgen
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -31,13 +32,13 @@ func (s *SqliteDriver) Pos() (string, error) {
 
 	row := s.db.QueryRow(query, s.cfg.SourceDB, s.cfg.Plugin, s.cfg.Publication)
 
-	if err := row.Err(); err != nil {
-		return "", fmt.Errorf("query pos: %w", err)
-	}
-
 	var pos string
 
 	if err := row.Scan(&pos); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+
 		return "", fmt.Errorf("read position: %w", err)
 	}
 
