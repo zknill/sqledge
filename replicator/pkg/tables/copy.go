@@ -16,7 +16,7 @@ type Conn interface {
 	CopyTo(ctx context.Context, w io.Writer, sql string) (pgconn.CommandTag, error)
 }
 
-func Copy(ctx context.Context, table string, def []sqlgen.ColDef, c Conn) ([]string, error) {
+func Copy(ctx context.Context, table string, def []sqlgen.ColDef, c Conn) ([][]string, error) {
 	var err error
 	// no position stored
 	// copy the entire database
@@ -30,22 +30,26 @@ func Copy(ctx context.Context, table string, def []sqlgen.ColDef, c Conn) ([]str
 	buf := buf(b.Bytes())
 	buf.popBytes(11)
 
-	fmt.Println("flags", buf.popInt32())
+	// flags
+	_ = buf.popInt32()
 
-	fmt.Println("header extension", buf.popInt32())
+	// header extension
+	_ = buf.popInt32()
 
 	decs := decoders(def)
 	if err != nil {
 		return nil, fmt.Errorf("build decs: %w", err)
 	}
 
-	cols := []string{}
+	cols := [][]string{}
 
 	for {
 		if buf.peekNextByte(0xff, 2) {
 			_ = buf.popBytes(2)
 			break
 		}
+
+		row := []string{}
 
 		nFields := buf.popInt16()
 
@@ -57,14 +61,16 @@ func Copy(ctx context.Context, table string, def []sqlgen.ColDef, c Conn) ([]str
 			if buf.peekNextByte(0xff, 4) {
 				_ = buf.popBytes(4)
 
-				cols = append(cols, "null")
+				row = append(row, "null")
 
 				continue
 			}
 
 			fieldLen := buf.popInt32()
-			cols = append(cols, decs[i].Decode(buf.popBytes(fieldLen)))
+			row = append(row, decs[i].Decode(buf.popBytes(fieldLen)))
 		}
+
+		cols = append(cols, row)
 	}
 
 	return cols, nil

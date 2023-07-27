@@ -349,6 +349,56 @@ func (s *Sqlite) Commit(_ *pglogrepl.CommitMessage) (string, error) {
 	), nil
 }
 
+func (s *Sqlite) Pos(p string) string {
+	s.pos, _ = pglogrepl.ParseLSN(p)
+
+	return fmt.Sprintf(
+		"INSERT OR REPLACE INTO postgres_pos (source_db, plugin, publication, pos) VALUES ('%s', '%s', '%s', '%s');",
+		s.cfg.SourceDB, s.cfg.Plugin, s.cfg.Publication, s.pos,
+	)
+}
+
+func (s *Sqlite) CopyCreateTable(schema, tableName string, colDefs []ColDef) (string, error) {
+	query := `CREATE TABLE IF NOT EXISTS ` + schema + "_" + tableName + ` ( `
+
+	for i, col := range colDefs {
+
+		mt := SQLiteColTypeText
+
+		if t, ok := mappedSqLiteTypes[col.Type]; ok && !col.Array {
+			mt = t
+		}
+
+		query += fmt.Sprintf("%s %s", col.Name, mt)
+		if i < len(colDefs)-1 {
+			query += ", "
+		}
+	}
+
+	query += ");"
+
+	return query, nil
+}
+
+func (s *Sqlite) InsertCopyRow(schema, tableName string, colDefs []ColDef, rowValues []string) (string, error) {
+	query := `INSERT INTO %s_%s VALUES ( %s );`
+
+	var row string
+	for i, v := range rowValues {
+		if v == "null" {
+			row += "null"
+		} else {
+			row += "'" + v + "'"
+		}
+
+		if i < len(rowValues)-1 {
+			row += ","
+		}
+	}
+
+	return fmt.Sprintf(query, schema, tableName, row), nil
+}
+
 type column struct {
 	name   string
 	value  interface{}

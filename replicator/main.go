@@ -64,6 +64,7 @@ func main() {
 		OutputPlugin:         *outputPlugin,
 		CreateSlotIfNoExists: true,
 		Temporary:            true,
+		Schema:               "public",
 	}
 
 	log.Debug().Msg("starting streaming")

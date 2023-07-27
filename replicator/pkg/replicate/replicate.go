@@ -5,17 +5,22 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/rs/zerolog/log"
+	"github.com/zknill/sqledge/replicator/pkg/sqlgen"
+	"github.com/zknill/sqledge/replicator/pkg/tables"
 )
 
 type Conn struct {
 	publication string
 	conn        *pgconn.PgConn
+	connStr     string
 
 	pos pglogrepl.LSN
 }
@@ -29,6 +34,7 @@ func NewConn(ctx context.Context, connString, publication string) (*Conn, error)
 	c := &Conn{
 		publication: publication,
 		conn:        conn,
+		connStr:     connString,
 	}
 
 	if err := c.identify(); err != nil {
@@ -70,6 +76,7 @@ type SlotConfig struct {
 	OutputPlugin         string
 	CreateSlotIfNoExists bool
 	Temporary            bool
+	Schema               string
 }
 
 type DBDriver interface {
@@ -89,6 +96,10 @@ type SQLGen interface {
 	StreamStop(*pglogrepl.StreamStopMessageV2) (string, error)
 	StreamCommit(*pglogrepl.StreamCommitMessageV2) (string, error)
 	StreamAbort(*pglogrepl.StreamAbortMessageV2) (string, error)
+
+	Pos(p string) string
+	CopyCreateTable(schema, tableName string, colDefs []sqlgen.ColDef) (string, error)
+	InsertCopyRow(schema, tableName string, colDefs []sqlgen.ColDef, rowValues []string) (string, error)
 }
 
 func (c *Conn) Stream(ctx context.Context, cfg SlotConfig, d DBDriver, gen SQLGen) error {
@@ -97,7 +108,19 @@ func (c *Conn) Stream(ctx context.Context, cfg SlotConfig, d DBDriver, gen SQLGe
 		return fmt.Errorf("find starting pos: %w", err)
 	}
 
-	log.Debug().Msg("starting copy")
+	if pos == "" {
+		log.Debug().Msg("starting copy")
+
+		if err := c.initialCopy(ctx, cfg.Schema, d, gen); err != nil {
+			return fmt.Errorf("copy: %w", err)
+		}
+
+		log.Debug().Msg("finished copy")
+
+		if err := d.Execute(gen.Pos(c.pos.String())); err != nil {
+			return fmt.Errorf("track position after copy: %w", err)
+		}
+	}
 
 	if pos != "" {
 		lsn, err := pglogrepl.ParseLSN(pos)
@@ -217,6 +240,51 @@ func (c *Conn) identify() error {
 	}
 
 	c.pos = sysident.XLogPos
+	return nil
+}
+
+func (c *Conn) initialCopy(ctx context.Context, schema string, driver DBDriver, gen SQLGen) error {
+	if schema == "" {
+		return fmt.Errorf("cannot copy for empty schema")
+	}
+
+	db, err := sql.Open("pgx", strings.Replace(c.connStr, "replication=database", "", 1))
+	if err != nil {
+		return fmt.Errorf("open connection: %w", err)
+	}
+
+	defs, err := tables.TableColDefs(db, schema, nil)
+	if err != nil {
+		return fmt.Errorf("load col definitions: %w", err)
+	}
+
+	for table, columns := range defs {
+		query, err := gen.CopyCreateTable(schema, table, columns)
+		if err := driver.Execute(query); err != nil {
+			return fmt.Errorf("execute inital copy: %w", err)
+		}
+
+		log.Debug().Msg(query)
+		vals, err := tables.Copy(ctx, table, columns, c.conn)
+		if err != nil {
+			return fmt.Errorf("copy table: %w", err)
+
+		}
+
+		for _, row := range vals {
+			query, err = gen.InsertCopyRow(schema, table, columns, row)
+			if err != nil {
+				return fmt.Errorf("generate sql: %w", err)
+			}
+
+			log.Debug().Msg(query)
+
+			if err := driver.Execute(query); err != nil {
+				return fmt.Errorf("execute inital copy: %w", err)
+			}
+		}
+	}
+
 	return nil
 }
 

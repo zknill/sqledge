@@ -14,6 +14,7 @@ import (
 
 type FieldDecoder interface {
 	Decode(b []byte) string
+	numeric() bool
 }
 
 func decoders(def []sqlgen.ColDef) []FieldDecoder {
@@ -58,6 +59,7 @@ func decoders(def []sqlgen.ColDef) []FieldDecoder {
 
 type int2 struct{}
 
+func (i *int2) numeric() bool { return true }
 func (i *int2) Decode(b []byte) string {
 	v := binary.BigEndian.Uint16(b)
 	return strconv.FormatUint(uint64(v), 10)
@@ -65,6 +67,7 @@ func (i *int2) Decode(b []byte) string {
 
 type int4 struct{}
 
+func (i *int4) numeric() bool { return true }
 func (i *int4) Decode(b []byte) string {
 	v := binary.BigEndian.Uint32(b)
 	return strconv.FormatUint(uint64(v), 10)
@@ -72,6 +75,7 @@ func (i *int4) Decode(b []byte) string {
 
 type int8 struct{}
 
+func (i *int8) numeric() bool { return true }
 func (i *int8) Decode(b []byte) string {
 	v := binary.BigEndian.Uint64(b)
 	return strconv.FormatUint(uint64(v), 10)
@@ -79,6 +83,7 @@ func (i *int8) Decode(b []byte) string {
 
 type float4 struct{}
 
+func (f *float4) numeric() bool { return true }
 func (f *float4) Decode(b []byte) string {
 	v := binary.BigEndian.Uint32(b)
 	return strconv.FormatFloat(float64(math.Float32frombits(v)), 'f', -1, 32)
@@ -86,6 +91,7 @@ func (f *float4) Decode(b []byte) string {
 
 type float8 struct{}
 
+func (f *float8) numeric() bool { return true }
 func (f *float8) Decode(b []byte) string {
 	v := binary.BigEndian.Uint64(b)
 	return strconv.FormatFloat(math.Float64frombits(v), 'f', -1, 64)
@@ -93,6 +99,7 @@ func (f *float8) Decode(b []byte) string {
 
 type numeric struct{}
 
+func (n *numeric) numeric() bool { return true }
 func (n *numeric) Decode(b []byte) string {
 	buf := buf(b)
 	ndigits := buf.popInt16()
@@ -138,24 +145,22 @@ func withoutZeros(i int) int {
 
 type str struct{}
 
-func (s *str) Decode(b []byte) string {
-	return string(b)
-}
+func (s *str) numeric() bool          { return false }
+func (s *str) Decode(b []byte) string { return string(b) }
 
 type jsonb struct{}
 
-func (j *jsonb) Decode(b []byte) string {
-	return string(b[1:])
-}
+func (j *jsonb) numeric() bool          { return false }
+func (j *jsonb) Decode(b []byte) string { return string(b[1:]) }
 
 type bytea struct{}
 
-func (b *bytea) Decode(v []byte) string {
-	return string(v)
-}
+func (b *bytea) numeric() bool          { return false }
+func (b *bytea) Decode(v []byte) string { return string(v) }
 
 type boolean struct{}
 
+func (b *boolean) numeric() bool { return false }
 func (b *boolean) Decode(v []byte) string {
 	if v[0] == 0x01 {
 		return "true"
@@ -167,6 +172,8 @@ func (b *boolean) Decode(v []byte) string {
 type arr struct {
 	elem FieldDecoder
 }
+
+func (d *arr) numeric() bool { return d.elem.numeric() }
 
 func (d *arr) Decode(b []byte) string {
 	buf := buf(b)
@@ -209,7 +216,15 @@ func (d *arr) Decode(b []byte) string {
 
 		fieldLen := buf.popInt32()
 
-		out.WriteString(`'` + d.elem.Decode(buf.popBytes(fieldLen)) + `'`)
+		if !d.elem.numeric() {
+			out.WriteString(`"`)
+		}
+
+		out.WriteString(d.elem.Decode(buf.popBytes(fieldLen)))
+
+		if !d.elem.numeric() {
+			out.WriteString(`"`)
+		}
 
 		if i < dim-1 {
 			out.WriteString(", ")
