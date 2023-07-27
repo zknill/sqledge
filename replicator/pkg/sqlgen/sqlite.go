@@ -55,14 +55,19 @@ func NewSqlite(cfg SqliteConfig, current map[string]map[string]ColDef) *Sqlite {
 // BLOB.    The value is a blob of data, stored
 //          exactly as it was input.
 
-var mappedSqLiteTypes = map[string]string{
-	"int2":    "integer",
-	"int4":    "integer",
-	"int8":    "integer",
-	"numeric": "real",
-	"float4":  "real",
-	"float8":  "real",
-	"bytea":   "blob",
+// map of postgres to sqltypes
+var mappedSqLiteTypes = map[ColType]ColType{
+	PgColTypeText:   SQLiteColTypeText,
+	PgColTypeInt2:   SQLiteColTypeInteger,
+	PgColTypeInt4:   SQLiteColTypeInteger,
+	PgColTypeInt8:   SQLiteColTypeInteger,
+	PgColTypeNum:    SQLiteColTypeReal,
+	PgColTypeFloat4: SQLiteColTypeReal,
+	PgColTypeFloat8: SQLiteColTypeReal,
+	PgColTypeBytea:  SQLiteColTypeBlob,
+	PgColTypeJson:   SQLiteColTypeText,
+	PgColTypeJsonB:  SQLiteColTypeText,
+	PgColTypeBool:   SQLiteColTypeText,
 }
 
 func (s *Sqlite) Relation(msg *pglogrepl.RelationMessageV2) (string, error) {
@@ -83,9 +88,9 @@ func (s *Sqlite) Relation(msg *pglogrepl.RelationMessageV2) (string, error) {
 				return "", errors.New("unknown type")
 			}
 
-			mappedType := "text"
+			mappedType := SQLiteColTypeText
 
-			if mt, ok := mappedSqLiteTypes[dt.Name]; ok {
+			if mt, ok := mappedSqLiteTypes[ColType(dt.Name)]; ok {
 				mappedType = mt
 			}
 
@@ -143,9 +148,9 @@ func (s *Sqlite) Relation(msg *pglogrepl.RelationMessageV2) (string, error) {
 			return "", errors.New("unknown type")
 		}
 
-		mappedType := "text"
+		mappedType := SQLiteColTypeText
 
-		if mt, ok := mappedSqLiteTypes[dt.Name]; ok {
+		if mt, ok := mappedSqLiteTypes[ColType(dt.Name)]; ok {
 			mappedType = mt
 		}
 

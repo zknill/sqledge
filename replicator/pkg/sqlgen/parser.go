@@ -27,9 +27,32 @@ const (
 
 type ColDef struct {
 	Name       string
-	Type       string
+	Type       ColType
 	PrimaryKey bool
+	Array      bool
 }
+
+type ColType string
+
+const (
+	// TODO: this is not all the types, missing: datetime, etc
+	PgColTypeText   ColType = "text"
+	PgColTypeInt2   ColType = "int2"
+	PgColTypeInt4   ColType = "int4"
+	PgColTypeInt8   ColType = "int8"
+	PgColTypeNum    ColType = "numeric"
+	PgColTypeFloat4 ColType = "float4"
+	PgColTypeFloat8 ColType = "float8"
+	PgColTypeBytea  ColType = "bytea"
+	PgColTypeJson   ColType = "json"
+	PgColTypeJsonB  ColType = "jsonb"
+	PgColTypeBool   ColType = "bool"
+
+	SQLiteColTypeInteger ColType = "integer"
+	SQLiteColTypeReal    ColType = "real"
+	SQLiteColTypeText    ColType = "text"
+	SQLiteColTypeBlob    ColType = "blob"
+)
 
 type Parser struct {
 	sql   string
@@ -96,7 +119,7 @@ func (p *Parser) Parse() (string, []ColDef, error) {
 			log.Trace().Msgf("type name: %q\n", typeName)
 			p.cols = append(p.cols, ColDef{
 				Name: colName,
-				Type: typeName,
+				Type: ColType(typeName),
 			})
 
 			switch p.peek() {
