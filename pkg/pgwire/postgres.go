@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"regexp"
 	"strings"
@@ -13,9 +14,22 @@ import (
 	"github.com/zknill/sqledge/pkg/sqlgen"
 )
 
+// magic numbers come from here:
+// - https://www.postgresql.org/docs/15/protocol-message-formats.html
+const (
+	SSLRequest     = 80877103
+	StartupMessage = 196608
+
+	AuthenticationOk = 'R'
+	BackendKeyData   = 'K'
+	ReadyForQuery    = 'Z'
+	SimpleQuery      = 'Q'
+	Exit             = 'X'
+)
+
 var withStatement = regexp.MustCompile(`with .* as (.*) select`)
 
-func Handle(upstream, local *sql.DB, conn net.Conn) {
+func Handle(schema string, upstream, local *sql.DB, conn net.Conn) {
 	if err := onStart(conn); err != nil {
 		log.Error().Err(err).Msg("on start error")
 	}
@@ -30,7 +44,12 @@ func Handle(upstream, local *sql.DB, conn net.Conn) {
 			return
 		}
 
-		if b[0] != SimpleQuery {
+		switch b[0] {
+		case SimpleQuery:
+		case Exit:
+			conn.Close()
+			return
+		default:
 			log.Error().Msgf("unknown message type: %q", string(b[0]))
 			return
 		}
@@ -54,14 +73,7 @@ func Handle(upstream, local *sql.DB, conn net.Conn) {
 			if err != nil {
 				log.Error().Err(err).Msg("local query")
 
-				// TODO; how to return an error
-				errResponse := pgproto3.ErrorResponse{Message: "query failed in proxy: " + err.Error()}
-				out := errResponse.Encode(nil)
-
-				ready := pgproto3.ReadyForQuery{TxStatus: 'I'}
-				out = ready.Encode(out)
-
-				conn.Write(out)
+				errReadyForQuery(fmt.Errorf("failed to query local: %w", err), conn)
 
 				continue
 			}
@@ -88,29 +100,75 @@ func Handle(upstream, local *sql.DB, conn net.Conn) {
 				continue
 			}
 		case strings.HasPrefix(query, "update"):
-		case strings.HasPrefix(query, "insert"):
-		case strings.HasPrefix(query, "delete"):
-		default:
-			// this should cover all unknown queries
-			// update, delete, truncate, create table, etc.
+			r, err := upstream.Exec(query)
+			if err != nil {
+				errReadyForQuery(fmt.Errorf("failed to query upstream: %w", err), conn)
 
+				continue
+			}
+
+			updates, err := r.RowsAffected()
+			cmd := pgproto3.CommandComplete{CommandTag: []byte("UPDATE " + fmt.Sprintf("%d", updates))}
+
+			out := cmd.Encode(nil)
+			ready := &pgproto3.ReadyForQuery{TxStatus: 'I'}
+			out = ready.Encode(out)
+
+			if _, err := conn.Write(out); err != nil {
+				log.Error().Err(err).Msg("write response")
+
+				continue
+			}
+		case strings.HasPrefix(query, "insert"):
+			r, err := upstream.Exec(query)
+			if err != nil {
+				errReadyForQuery(fmt.Errorf("failed to query upstream: %w", err), conn)
+
+				continue
+			}
+
+			updates, err := r.RowsAffected()
+			cmd := pgproto3.CommandComplete{CommandTag: []byte("INSERT 0 " + fmt.Sprintf("%d", updates))}
+
+			out := cmd.Encode(nil)
+			ready := &pgproto3.ReadyForQuery{TxStatus: 'I'}
+			out = ready.Encode(out)
+
+			if _, err := conn.Write(out); err != nil {
+				log.Error().Err(err).Msg("write response")
+
+				continue
+			}
+		case strings.HasPrefix(query, "delete"):
+			r, err := upstream.Exec(query)
+			if err != nil {
+				errReadyForQuery(fmt.Errorf("failed to query upstream: %w", err), conn)
+
+				continue
+			}
+
+			updates, err := r.RowsAffected()
+			cmd := pgproto3.CommandComplete{CommandTag: []byte("DELETE " + fmt.Sprintf("%d", updates))}
+
+			out := cmd.Encode(nil)
+			ready := &pgproto3.ReadyForQuery{TxStatus: 'I'}
+			out = ready.Encode(out)
+
+			if _, err := conn.Write(out); err != nil {
+				log.Error().Err(err).Msg("write response")
+
+				continue
+			}
+		default:
+			// this covers all unknown queries
+			errReadyForQuery(fmt.Errorf("unknown query type: %q", query), conn)
+
+			continue
 		}
 
 	}
 
 }
-
-// magic numbers come from here:
-// - https://www.postgresql.org/docs/15/protocol-message-formats.html
-const (
-	SSLRequest     = 80877103
-	StartupMessage = 196608
-
-	AuthenticationOk = 'R'
-	BackendKeyData   = 'K'
-	ReadyForQuery    = 'Z'
-	SimpleQuery      = 'Q'
-)
 
 // Eventually this method should parse the connection
 // details and connect to the upstream database using them.
@@ -252,4 +310,14 @@ func rowDesc(rows *sql.Rows) *pgproto3.RowDescription {
 	}
 
 	return rowDesc
+}
+
+func errReadyForQuery(err error, w io.Writer) {
+	errResponse := pgproto3.ErrorResponse{Message: err.Error()}
+	out := errResponse.Encode(nil)
+
+	ready := pgproto3.ReadyForQuery{TxStatus: 'I'}
+	out = ready.Encode(out)
+
+	w.Write(out)
 }

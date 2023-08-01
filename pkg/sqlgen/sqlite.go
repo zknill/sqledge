@@ -73,8 +73,10 @@ var mappedSqLiteTypes = map[ColType]ColType{
 func (s *Sqlite) Relation(msg *pglogrepl.RelationMessageV2) (string, error) {
 	s.relations[msg.RelationID] = msg
 
-	ccols, exists := s.current[msg.Namespace+"_"+msg.RelationName]
+	ccols, exists := s.current[msg.RelationName]
 	if !exists {
+		// TODO (bug): tables created in the initial copy
+		// aren't updated in this objects column definitions
 		// CREATE TABLE
 		// doesn't exist as current table
 		currentCols := map[string]ColDef{}
@@ -98,7 +100,6 @@ func (s *Sqlite) Relation(msg *pglogrepl.RelationMessageV2) (string, error) {
 				Type: mappedType,
 			}
 
-			fmt.Printf("col: %v\n", *col)
 			if col.Flags == 1 {
 				pk = append(pk, col.Name)
 				cd.PrimaryKey = true
@@ -119,11 +120,10 @@ func (s *Sqlite) Relation(msg *pglogrepl.RelationMessageV2) (string, error) {
 			pks = ", PRIMARY KEY (" + strings.Join(pk, ", ") + ") "
 		}
 
-		s.current[msg.Namespace+"_"+msg.RelationName] = currentCols
+		s.current[msg.RelationName] = currentCols
 
 		return fmt.Sprintf(
-			"CREATE TABLE %s_%s (%s%s);",
-			msg.Namespace,
+			"CREATE TABLE IF NOT EXISTS %s (%s%s);",
 			msg.RelationName,
 			buf.String(),
 			pks,
@@ -156,7 +156,7 @@ func (s *Sqlite) Relation(msg *pglogrepl.RelationMessageV2) (string, error) {
 
 		ccol, ok := ccols[col.Name]
 		if !ok {
-			statements = append(statements, fmt.Sprintf("ALTER TABLE %s_%s ADD COLUMN %s %s;", msg.Namespace, msg.RelationName, col.Name, mappedType))
+			statements = append(statements, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s;", msg.RelationName, col.Name, mappedType))
 			ccols[col.Name] = ColDef{
 				Name: col.Name,
 				Type: mappedType,
@@ -185,7 +185,7 @@ func (s *Sqlite) Relation(msg *pglogrepl.RelationMessageV2) (string, error) {
 			continue
 		}
 
-		statements = append(statements, fmt.Sprintf("ALTER TABLE %s_%s DROP COLUMN %s;", msg.Namespace, msg.RelationName, k))
+		statements = append(statements, fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s;", msg.RelationName, k))
 	}
 
 	return strings.Join(statements, " "), nil
@@ -219,8 +219,7 @@ func (s *Sqlite) Insert(msg *pglogrepl.InsertMessageV2) (string, error) {
 	}
 
 	return fmt.Sprintf(
-		"INSERT INTO %s_%s (%s) VALUES (%s);",
-		rel.Namespace,
+		"INSERT INTO %s (%s) VALUES (%s);",
 		rel.RelationName,
 		cBuf.String(),
 		vBuf.String(),
@@ -269,8 +268,7 @@ func (s *Sqlite) Update(msg *pglogrepl.UpdateMessageV2) (string, error) {
 	}
 
 	return fmt.Sprintf(
-		"UPDATE %s_%s SET %s WHERE %s;",
-		rel.Namespace,
+		"UPDATE %s SET %s WHERE %s;",
 		rel.RelationName,
 		buf.String()[:len(buf.String())-1],
 		kBuf.String()[:len(kBuf.String())-5],
@@ -299,8 +297,7 @@ func (s *Sqlite) Delete(msg *pglogrepl.DeleteMessageV2) (string, error) {
 	}
 
 	return fmt.Sprintf(
-		"DELETE FROM %s_%s WHERE %s;",
-		rel.Namespace,
+		"DELETE FROM %s WHERE %s;",
 		rel.RelationName,
 		kBuf.String()[:len(kBuf.String())-5],
 	), nil
@@ -315,7 +312,7 @@ func (s *Sqlite) Truncate(msg *pglogrepl.TruncateMessageV2) (string, error) {
 			return "", errors.New("unknown relation")
 		}
 
-		fmt.Fprintf(buf, "DELETE FROM %s_%s; ", rel.Namespace, rel.RelationName)
+		fmt.Fprintf(buf, "DELETE FROM %s; ", rel.RelationName)
 	}
 
 	return buf.String(), nil
@@ -359,7 +356,7 @@ func (s *Sqlite) Pos(p string) string {
 }
 
 func (s *Sqlite) CopyCreateTable(schema, tableName string, colDefs []ColDef) (string, error) {
-	query := `CREATE TABLE IF NOT EXISTS ` + schema + "_" + tableName + ` ( `
+	query := `CREATE TABLE IF NOT EXISTS ` + tableName + ` ( `
 
 	for i, col := range colDefs {
 
@@ -381,7 +378,7 @@ func (s *Sqlite) CopyCreateTable(schema, tableName string, colDefs []ColDef) (st
 }
 
 func (s *Sqlite) InsertCopyRow(schema, tableName string, colDefs []ColDef, rowValues []string) (string, error) {
-	query := `INSERT INTO %s_%s VALUES ( %s );`
+	query := `INSERT INTO %s VALUES ( %s );`
 
 	var row string
 	for i, v := range rowValues {
@@ -396,7 +393,7 @@ func (s *Sqlite) InsertCopyRow(schema, tableName string, colDefs []ColDef, rowVa
 		}
 	}
 
-	return fmt.Sprintf(query, schema, tableName, row), nil
+	return fmt.Sprintf(query, tableName, row), nil
 }
 
 type column struct {

@@ -5,6 +5,7 @@ go 1.20
 require (
 	github.com/jackc/pglogrepl v0.0.0-20230630212501-5fd22a600b50
 	github.com/jackc/pgx/v5 v5.4.2
+	github.com/joeshaw/envdecode v0.0.0-20200121155833-099f1fc765bd
 	github.com/mattn/go-sqlite3 v1.14.17
 	github.com/rs/zerolog v1.29.1
 	github.com/stretchr/testify v1.8.4
