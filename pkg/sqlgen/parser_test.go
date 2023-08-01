@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zknill/sqledge/replicator/pkg/sqlgen"
+	"github.com/zknill/sqledge/pkg/sqlgen"
 )
 
 func TestParseSql(t *testing.T) {

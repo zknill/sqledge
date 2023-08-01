@@ -54,6 +54,21 @@ const (
 	SQLiteColTypeBlob    ColType = "blob"
 )
 
+func (c ColType) PgType() (oid, size int) {
+	switch c {
+	case SQLiteColTypeText:
+		return 25, -1
+	case SQLiteColTypeInteger:
+		return 23, 4
+	case SQLiteColTypeReal:
+		return 700, 4
+	case SQLiteColTypeBlob:
+		return 17, -1
+	}
+
+	return -1, -1
+}
+
 type Parser struct {
 	sql   string
 	i     int

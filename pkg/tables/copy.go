@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog/log"
-	"github.com/zknill/sqledge/replicator/pkg/sqlgen"
+	"github.com/zknill/sqledge/pkg/sqlgen"
 )
 
 type Conn interface {

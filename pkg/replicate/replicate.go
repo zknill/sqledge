@@ -13,8 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgproto3"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/rs/zerolog/log"
-	"github.com/zknill/sqledge/replicator/pkg/sqlgen"
-	"github.com/zknill/sqledge/replicator/pkg/tables"
+	"github.com/zknill/sqledge/pkg/sqlgen"
+	"github.com/zknill/sqledge/pkg/tables"
 )
 
 type Conn struct {

@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog/log"
-	"github.com/zknill/sqledge/replicator/pkg/sqlgen"
+	"github.com/zknill/sqledge/pkg/sqlgen"
 )
 
 type FieldDecoder interface {

@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/zknill/sqledge/replicator/pkg/sqlgen"
+	"github.com/zknill/sqledge/pkg/sqlgen"
 )
 
 type Querier interface {

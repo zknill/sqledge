@@ -10,8 +10,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"github.com/zknill/sqledge/replicator/pkg/replicate"
-	"github.com/zknill/sqledge/replicator/pkg/sqlgen"
+	"github.com/zknill/sqledge/pkg/replicate"
+	"github.com/zknill/sqledge/pkg/sqlgen"
 )
 
 var (

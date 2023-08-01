@@ -14,8 +14,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"github.com/zknill/sqledge/replicator/pkg/sqlgen"
-	"github.com/zknill/sqledge/replicator/pkg/tables"
+	"github.com/zknill/sqledge/pkg/sqlgen"
+	"github.com/zknill/sqledge/pkg/tables"
 )
 
 func init() {
