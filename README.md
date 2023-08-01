@@ -7,6 +7,8 @@ SQLedge serves reads from it's local sqlite database, and forwards writes to the
 
 This lets you run your apps on the edge, and have local, fast, and eventually consistent access to your data.
 
+![SQLedge](https://github.com/zknill/sqledge/blob/main/etc/sqledge.png?raw=true)
+
 ## SQL generation
 
 The `pkg/sqlgen` package has an SQL generator in it, which will generate sqlite insert, update, delete statements based on the logical replication messages received.
