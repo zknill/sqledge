@@ -14,6 +14,7 @@ import (
 
 type Conn interface {
 	CopyTo(ctx context.Context, w io.Writer, sql string) (pgconn.CommandTag, error)
+	Exec(ctx context.Context, sql string) *pgconn.MultiResultReader
 }
 
 func Copy(ctx context.Context, table string, def []sqlgen.ColDef, c Conn) ([][]string, error) {
@@ -22,7 +23,10 @@ func Copy(ctx context.Context, table string, def []sqlgen.ColDef, c Conn) ([][]s
 	// copy the entire database
 	b := &bytes.Buffer{}
 
-	_, err = c.CopyTo(ctx, b, fmt.Sprintf(`copy %s to stdout with binary`, table))
+	query := fmt.Sprintf(`COPY %s TO STDOUT WITH BINARY;`, table)
+	log.Debug().Msg(query)
+
+	_, err = c.CopyTo(ctx, b, query)
 	if err != nil {
 		log.Error().Err(err).Msg("copy error")
 	}

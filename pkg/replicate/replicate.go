@@ -108,20 +108,6 @@ func (c *Conn) Stream(ctx context.Context, cfg SlotConfig, d DBDriver, gen SQLGe
 		return fmt.Errorf("find starting pos: %w", err)
 	}
 
-	if pos == "" {
-		log.Debug().Msg("starting copy")
-
-		if err := c.initialCopy(ctx, cfg.Schema, d, gen); err != nil {
-			return fmt.Errorf("copy: %w", err)
-		}
-
-		log.Debug().Msg("finished copy")
-
-		if err := d.Execute(gen.Pos(c.pos.String())); err != nil {
-			return fmt.Errorf("track position after copy: %w", err)
-		}
-	}
-
 	if pos != "" {
 		lsn, err := pglogrepl.ParseLSN(pos)
 		switch {
@@ -139,6 +125,22 @@ func (c *Conn) Stream(ctx context.Context, cfg SlotConfig, d DBDriver, gen SQLGe
 	if err != nil {
 		return fmt.Errorf("build slot: %w", err)
 	}
+
+	if pos == "" {
+		log.Debug().Msg("starting copy")
+
+		if err := c.initialCopy(ctx, cfg.Schema, slot.startSnapshot, d, gen); err != nil {
+			return fmt.Errorf("copy: %w", err)
+		}
+
+		log.Debug().Msg("finished copy")
+
+		if err := d.Execute(gen.Pos(c.pos.String())); err != nil {
+			return fmt.Errorf("track position after copy: %w", err)
+		}
+	}
+
+	log.Debug().Msgf("starting slot from pos: %q", c.pos)
 
 	if err := slot.start(ctx); err != nil {
 		return fmt.Errorf("start slot: %w", err)
@@ -211,9 +213,16 @@ func (c *Conn) slot(slotName, outputPlugin string, createSlot, temporary bool, p
 		"streaming 'false'",
 	}
 
+	s := &slot{
+		conn: c.conn,
+		args: pluginArguments,
+		name: slotName,
+		pos:  c.pos,
+	}
+
 	// TODO: automatically work out if slot exists
 	if createSlot {
-		_, err := pglogrepl.CreateReplicationSlot(
+		res, err := pglogrepl.CreateReplicationSlot(
 			context.Background(),
 			c.conn,
 			slotName,
@@ -223,14 +232,11 @@ func (c *Conn) slot(slotName, outputPlugin string, createSlot, temporary bool, p
 		if err != nil {
 			return nil, fmt.Errorf("create slot: %w", err)
 		}
+
+		s.startSnapshot = res.SnapshotName
 	}
 
-	return &slot{
-		conn: c.conn,
-		args: pluginArguments,
-		name: slotName,
-		pos:  c.pos,
-	}, nil
+	return s, nil
 }
 
 func (c *Conn) identify() error {
@@ -243,29 +249,76 @@ func (c *Conn) identify() error {
 	return nil
 }
 
-func (c *Conn) initialCopy(ctx context.Context, schema string, driver DBDriver, gen SQLGen) error {
-	if schema == "" {
-		return fmt.Errorf("cannot copy for empty schema")
-	}
-
-	db, err := sql.Open("pgx", strings.Replace(c.connStr, "replication=database", "", 1))
+func tableColDefs(connStr, schema string) (map[string][]sqlgen.ColDef, error) {
+	db, err := sql.Open("pgx", strings.Replace(connStr, "replication=database", "", 1))
 	if err != nil {
-		return fmt.Errorf("open connection: %w", err)
+		return nil, fmt.Errorf("open connection: %w", err)
 	}
 
 	defs, err := tables.TableColDefs(db, schema, nil)
 	if err != nil {
-		return fmt.Errorf("load col definitions: %w", err)
+		return nil, fmt.Errorf("load col definitions: %w", err)
 	}
 
+	return defs, nil
+}
+
+func (c *Conn) initialCopy(ctx context.Context, schema, snapshotName string, dst DBDriver, gen SQLGen) (err error) {
+	if schema == "" {
+		return fmt.Errorf("cannot copy for empty schema")
+	}
+
+	defs, err := tableColDefs(c.connStr, schema)
+	if err != nil {
+		return fmt.Errorf("load col defs: %w", err)
+	}
+
+	copyConn, err := pgconn.Connect(context.Background(), c.connStr)
+	if err != nil {
+		return fmt.Errorf("pgconnect: %w", err)
+	}
+
+	query := `BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;`
+	if snapshotName != "" {
+		query += fmt.Sprintf("SET TRANSACTION SNAPSHOT '%s';", snapshotName)
+	}
+
+	log.Debug().Msg(query)
+
+	copyConn.Exec(ctx, query).Close()
+
+	defer func() {
+		defer copyConn.Close(ctx)
+
+		if e := recover(); e != nil {
+			copyConn.Exec(ctx, `ROLLBACK;`).Close()
+			err = fmt.Errorf("recover: %v", e)
+			log.Debug().Msg("ROLLBACK")
+		}
+
+		if err != nil {
+			copyConn.Exec(ctx, `ROLLBACK;`).Close()
+			log.Debug().Msg("ROLLBACK")
+		}
+
+		copyConn.Exec(ctx, `COMMIT;`).Close()
+		log.Debug().Msg("COMMIT")
+	}()
+
 	for table, columns := range defs {
-		query, err := gen.CopyCreateTable(schema, table, columns)
-		if err := driver.Execute(query); err != nil {
+		var (
+			query string
+			vals  [][]string
+		)
+
+		query, err = gen.CopyCreateTable(schema, table, columns)
+
+		if err = dst.Execute(query); err != nil {
 			return fmt.Errorf("execute inital copy: %w", err)
 		}
 
 		log.Debug().Msg(query)
-		vals, err := tables.Copy(ctx, table, columns, c.conn)
+		vals, err = tables.Copy(ctx, table, columns, copyConn)
 		if err != nil {
 			return fmt.Errorf("copy table: %w", err)
 
@@ -279,7 +332,7 @@ func (c *Conn) initialCopy(ctx context.Context, schema string, driver DBDriver, 
 
 			log.Debug().Msg(query)
 
-			if err := driver.Execute(query); err != nil {
+			if err = dst.Execute(query); err != nil {
 				return fmt.Errorf("execute inital copy: %w", err)
 			}
 		}
@@ -291,9 +344,10 @@ func (c *Conn) initialCopy(ctx context.Context, schema string, driver DBDriver, 
 type slot struct {
 	conn *pgconn.PgConn
 
-	args []string
-	name string
-	pos  pglogrepl.LSN
+	args          []string
+	name          string
+	pos           pglogrepl.LSN
+	startSnapshot string
 
 	msgs chan pglogrepl.Message
 	errs chan error

@@ -28,6 +28,9 @@ off.
 
 If no LSN is found, SQLedge will start a postgres `COPY` of all tables in the `public` schema. Creating the appropriate SQLite tables, and inserting data.
 
+When the replication slot is first created, it exports a transaction snapshot. This snapshot is used for the initial copy. This means that the COPY command will read the data from
+the transaction at the moment the replication slot was created. 
+
 ## Trying it out
 
 1. Create a database
