@@ -21,6 +21,14 @@ When the database is started, we look at which tables already exist in the sqlit
 
 SQLedge contains a postgres wire proxy, default on localhost:5433. This proxy uses the local sqlite database for reads, and forwards writes to the upstream postgres server.
 
+### Compatibility 
+
+When running, the SQL statements interact with two databases; Postgres (for writes) and SQLite (for reads). 
+
+The Postgres wire proxy (which forwards reads to SQLite) doesn't currently translate any of the SQL statements from Postgres query format/functions to SQLite format/functions. 
+Read queries issued against the Postgres wire proxy need to be compatible with SQLite directly. 
+This is fine for simple `SELECT` queries, but you will have trouble with Postgres specific query functions or syntax.
+
 ## Copy on startup
 
 SQLEdge maintains a table called `postgres_pos`, this tracks the LSN (log sequence number) of the received logical replication messages so it can pick up processing where it left
@@ -28,7 +36,7 @@ off.
 
 If no LSN is found, SQLedge will start a postgres `COPY` of all tables in the `public` schema. Creating the appropriate SQLite tables, and inserting data.
 
-When the replication slot is first created, it exports a transaction snapshot. This snapshot is used for the initial copy. This means that the COPY command will read the data from
+When the replication slot is first created, it exports a transaction snapshot. This snapshot is used for the initial copy. This means that the `COPY` command will read the data from
 the transaction at the moment the replication slot was created. 
 
 ## Trying it out
