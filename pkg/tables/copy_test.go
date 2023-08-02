@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +35,7 @@ func TestCopy(t *testing.T) {
 		postgres.WithPassword("postgres"),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).WithStartupTimeout(5*time.Second)),
+				WithOccurrence(2).WithStartupTimeout(10*time.Second)),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -48,6 +49,8 @@ func TestCopy(t *testing.T) {
 
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	assert.NoError(t, err)
+
+	connStr = strings.ReplaceAll(connStr, "host=localhost", "host=0.0.0.0")
 
 	conn, err := pgconn.Connect(context.Background(), connStr)
 	assert.NoError(t, err)
@@ -79,29 +82,29 @@ func TestCopy(t *testing.T) {
 	cols, err := tables.Copy(context.Background(), "alltypes", def, conn)
 	assert.NoError(t, err)
 
-	want := []string{
+	want := [][]string{{
 		"1",
 		"2",
 		"3",
 		"a",
-		"{'b'}",
+		`{"b"}`,
 		`"c"`,
 		`"d"`,
-		"{'4', '5'}",
-		"{'6', '7'}",
-		"{'9', '9'}",
-		`{'e', 'f'}`,
+		"{4, 5}",
+		"{6, 7}",
+		"{9, 9}",
+		`{"e", "f"}`,
 		"true",
-		"{'true', 'false', 'true'}",
+		`{"true", "false", "true"}`,
 		"10101.919191",
-		"{'8888.111', '9999.222'}",
+		"{8888.111, 9999.222}",
 		"10.1",
 		"11.2",
-		"{'12.3', '12.4'}",
-		"{'13.5', '13.6'}",
+		"{12.3, 12.4}",
+		"{13.5, 13.6}",
 		"a",
-		`{'b'}`,
-	}
+		`{"b"}`,
+	}}
 
 	assert.Equal(t, want, cols)
 

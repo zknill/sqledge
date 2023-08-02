@@ -11,10 +11,10 @@ import (
 	"github.com/zknill/sqledge/pkg/sqlgen"
 )
 
-func Run(cfg *config.Config) error {
+func Run(ctx context.Context, cfg *config.Config) error {
 	connStr := cfg.PostgresConnString() + "&replication=database"
 
-	conn, err := replicateConnection(connStr, cfg.Replication.Publication)
+	conn, err := replicateConnection(ctx, connStr, cfg.Replication.Publication)
 	if err != nil {
 		return fmt.Errorf("create replicate connection: %w", err)
 	}
@@ -59,7 +59,7 @@ func Run(cfg *config.Config) error {
 	log.Debug().Msg("starting streaming")
 
 	if err := conn.Stream(
-		context.Background(),
+		ctx,
 		slot,
 		driver,
 		sqlite,
@@ -70,8 +70,8 @@ func Run(cfg *config.Config) error {
 	return nil
 }
 
-func replicateConnection(connectionString, publication string) (*Conn, error) {
-	conn, err := NewConn(context.Background(), connectionString, publication)
+func replicateConnection(ctx context.Context, connectionString, publication string) (*Conn, error) {
+	conn, err := NewConn(ctx, connectionString, publication)
 	if err != nil {
 		return nil, fmt.Errorf("new conn: %w", err)
 	}

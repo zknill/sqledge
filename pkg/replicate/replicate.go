@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/zknill/sqledge/pkg/sqlgen"
 	"github.com/zknill/sqledge/pkg/tables"
@@ -157,6 +159,7 @@ func (c *Conn) Stream(ctx context.Context, cfg SlotConfig, d DBDriver, gen SQLGe
 		select {
 		case <-ctx.Done():
 			slot.close()
+			return ctx.Err()
 		case <-slot.errs:
 			return fmt.Errorf("slot error: %w", err)
 		case logicalMsg = <-stream:
@@ -191,6 +194,7 @@ func (c *Conn) Stream(ctx context.Context, cfg SlotConfig, d DBDriver, gen SQLGe
 			query, err = gen.StreamAbort(logicalMsg)
 		default:
 			log.Debug().Msgf("Unknown message type in pgoutput stream: %T", logicalMsg)
+			continue
 		}
 
 		log.Debug().Msg(query)
@@ -395,6 +399,12 @@ func (s *slot) listen() {
 	inStream := false
 
 	for {
+		select {
+		case <-s.done:
+			return
+		default:
+		}
+
 		if time.Now().After(nextStandbyMessageDeadline) {
 			log.Trace().Msg("status heartbeat")
 			err := pglogrepl.SendStandbyStatusUpdate(
@@ -485,10 +495,19 @@ func (s *slot) close() error {
 }
 
 func (s *slot) sendErr(err error) {
-	log.Error().Err(err).Msg("send error")
 	if err == nil {
 		return
 	}
+
+	var evt *zerolog.Event
+
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		evt = log.Warn()
+	} else {
+		evt = log.Error()
+	}
+
+	evt.Err(err).Msg("send error")
 
 	select {
 	case s.errs <- err:

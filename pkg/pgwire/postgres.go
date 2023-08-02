@@ -159,6 +159,66 @@ func Handle(schema string, upstream, local *sql.DB, conn net.Conn) {
 
 				continue
 			}
+		case strings.HasPrefix(query, "create table"):
+			log.Debug().Msgf("handle create table: %q", query)
+			_, err := upstream.Exec(query)
+			if err != nil {
+				errReadyForQuery(fmt.Errorf("failed to query upstream: %w", err), conn)
+
+				continue
+			}
+			log.Debug().Msgf("upstream for create table: %q", query)
+
+			cmd := pgproto3.CommandComplete{CommandTag: []byte("CREATE TABLE")}
+			out := cmd.Encode(nil)
+
+			ready := &pgproto3.ReadyForQuery{TxStatus: 'I'}
+			out = ready.Encode(out)
+
+			if _, err := conn.Write(out); err != nil {
+				log.Error().Err(err).Msg("write response")
+
+				continue
+			}
+			log.Debug().Msgf("success create table: %q", query)
+		case strings.HasPrefix(query, "delete table"):
+			_, err := upstream.Exec(query)
+			if err != nil {
+				errReadyForQuery(fmt.Errorf("failed to query upstream: %w", err), conn)
+
+				continue
+			}
+
+			cmd := pgproto3.CommandComplete{CommandTag: []byte("DELETE TABLE")}
+			out := cmd.Encode(nil)
+
+			ready := &pgproto3.ReadyForQuery{TxStatus: 'I'}
+			out = ready.Encode(out)
+
+			if _, err := conn.Write(out); err != nil {
+				log.Error().Err(err).Msg("write response")
+
+				continue
+			}
+		case strings.HasPrefix(query, "alter table"):
+			_, err := upstream.Exec(query)
+			if err != nil {
+				errReadyForQuery(fmt.Errorf("failed to query upstream: %w", err), conn)
+
+				continue
+			}
+
+			cmd := pgproto3.CommandComplete{CommandTag: []byte("ALTER TABLE")}
+			out := cmd.Encode(nil)
+
+			ready := &pgproto3.ReadyForQuery{TxStatus: 'I'}
+			out = ready.Encode(out)
+
+			if _, err := conn.Write(out); err != nil {
+				log.Error().Err(err).Msg("write response")
+
+				continue
+			}
 		default:
 			// this covers all unknown queries
 			errReadyForQuery(fmt.Errorf("unknown query type: %q", query), conn)
@@ -313,6 +373,7 @@ func rowDesc(rows *sql.Rows) *pgproto3.RowDescription {
 }
 
 func errReadyForQuery(err error, w io.Writer) {
+	log.Error().Err(err).Msg("error in pgwire")
 	errResponse := pgproto3.ErrorResponse{Message: err.Error()}
 	out := errResponse.Encode(nil)
 

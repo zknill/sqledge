@@ -29,7 +29,8 @@ type Config struct {
 	}
 
 	Proxy struct {
-		ListenAddress string `env:"SQLEDGE_PROXY_ADDRESS,default=localhost:5433"`
+		Address string `env:"SQLEDGE_PROXY_ADDRESS,default=localhost"`
+		Port    int    `env:"SQLEDGE_PROXY_ADDRESS,default=5433"`
 	}
 }
 
