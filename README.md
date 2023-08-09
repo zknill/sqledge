@@ -2,8 +2,8 @@
 
 [State: alpha]
 
-SQLedge uses postgres logical replication to stream the changes in a source postgres database to an SQLite database that can run on the edge.
-SQLedge serves reads from it's local sqlite database, and forwards writes to the upstream postgres server that it's replicating from.
+SQLedge uses Postgres logical replication to stream the changes in a source Postgres database to a SQLite database that can run on the edge.
+SQLedge serves reads from its local SQLite database, and forwards writes to the upstream Postgres server that it's replicating from.
 
 This lets you run your apps on the edge, and have local, fast, and eventually consistent access to your data.
 
@@ -11,7 +11,7 @@ This lets you run your apps on the edge, and have local, fast, and eventually co
 
 ## SQL generation
 
-The `pkg/sqlgen` package has an SQL generator in it, which will generate sqlite insert, update, delete statements based on the logical replication messages received.
+The `pkg/sqlgen` package has an SQL generator in it, which will generate the SQLite insert, update, delete statements based on the logical replication messages received.
 
 ## SQL parsing
 
@@ -19,15 +19,15 @@ When the database is started, we look at which tables already exist in the sqlit
 
 ## Postgres wire proxy
 
-SQLedge contains a postgres wire proxy, default on localhost:5433. This proxy uses the local sqlite database for reads, and forwards writes to the upstream postgres server.
+SQLedge contains a Postgres wire proxy, default on `localhost:5433`. This proxy uses the local SQlite database for reads, and forwards writes to the upstream Postgres server.
 
 ### Compatibility 
 
 When running, the SQL statements interact with two databases; Postgres (for writes) and SQLite (for reads). 
 
-The Postgres wire proxy (which forwards reads to SQLite) doesn't currently translate any of the SQL statements from Postgres query format/functions to SQLite format/functions. 
+The Postgres wire proxy (which forwards reads to SQLite) doesn't currently translate any of the SQL statements from the Postgres query format/functions to the SQLite format/functions. 
 Read queries issued against the Postgres wire proxy need to be compatible with SQLite directly. 
-This is fine for simple `SELECT` queries, but you will have trouble with Postgres specific query functions or syntax.
+This is fine for simple `SELECT` queries, but you will have trouble with Postgres-specific query functions or syntax.
 
 ## Copy on startup
 
